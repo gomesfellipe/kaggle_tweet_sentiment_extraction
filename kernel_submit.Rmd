@@ -45,12 +45,14 @@ Project authors and participants:
 
 # Modeling
 
-<!-- estrategias: -->
-<!-- Converter caracteresde smiles para tokens especiais -->
-<!-- NER - Spacy,  -->
-<!-- Word2vec pra vetorizar -->
-
 <!-- baseline: todo texto (positive, neutral e negative) -->
+
+<!-- estrategias: -->
+<!-- Word2vec pra vetorizar -->
+<!-- NER - Spacy,  -->
+<!-- Text summarization -->
+<!-- BERT -->
+
 
 
 # Conclusion
@@ -61,4 +63,5 @@ Project authors and participants:
 <https://www.kaggle.com/khoongweihao/feature-engineering-lightgbm-model-starter-kit>
 <https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/139803>
 <https://www.kaggle.com/jonathanbesomi/question-answering-starter-pack>
+<https://machinelearningmastery.com/gentle-introduction-text-summarization/>
 
