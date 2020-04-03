@@ -20,7 +20,8 @@ Project authors and participants:
 <!-- premissas: -->
 <!-- Pontos de reflexao -->
 <!-- Problemas de corte nos textos selecionados não terão impacto sobre o a medida Jaccard final -->
- <!-- O txto selecionado foi obtido por um modelo e elesq ueremo comparar os resultados ou um humano apenas copiou e colou  -->
+<!-- O txto selecionado foi obtido por um modelo e elesq ueremo comparar os resultados ou um humano apenas copiou e colou  -->
+<!-- Existem select text que aparecem mais de uma vezno text  -->
 
 
 # Available data
@@ -34,6 +35,7 @@ Project authors and participants:
 <!-- numero de palavras -->
 <!-- Numero de caracteres iguais entre text e selected -->
 <!-- palavras que mais coocorrem -->
+<!-- n de exclamacoes correlacionado com sentimento negativo? -->
 
 
 <!-- Calcular Jaccard entre os textos para cada sentimento -->
