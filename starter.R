@@ -68,6 +68,9 @@ clean_text <- function(x) {
 #'
 # metadata
 get_metadata <- function(x) {
+  t0 <- Sys.time()
+  cat("Getting metadata, please wait ..\n")
+  
   x <-
     x %>%
     # rename selected_text to sel_text
@@ -111,6 +114,9 @@ get_metadata <- function(x) {
                       as_tibble() } ) ) } %>%
     select(textID, text, sel_text, sentiment, start, end, jaccard, 
            text_clean, sel_text_clean, everything())
+  
+  cat(paste0("Metadata successfully obtained!\nThe process took: ",
+             round(Sys.time()-t0) ," seconds"))
 }
 
 # Script --------------------------------------------------------------------------------------
@@ -127,15 +133,16 @@ train_data <- read_csv("data/train.csv")
 test_data <- read_csv("data/train.csv")
 # failures source: https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/138272
 
-test_data
 train_data
-dim(test_data)
 dim(train_data)
 
-# get metadata:
-metadata <- get_metadata(train_data)
+test_data
+dim(test_data)
 
-metadata
+# get metadata:
+train_metadata <- get_metadata(train_data) # aguarde um pouco..
+test_metadata <- get_metadata(test_data) # aguarde um pouco..
+
 
 
 
