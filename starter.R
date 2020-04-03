@@ -68,7 +68,7 @@ clean_text <- function(x) {
 #'
 # metadata
 get_metadata <- function(x) {
-  t0 <- Sys.time()
+  t0 <- Sys.time() # to print time
   cat("Getting metadata, please wait ..\n")
   
   x <-
@@ -116,7 +116,7 @@ get_metadata <- function(x) {
            text_clean, sel_text_clean, everything())
   
   cat(paste0("Metadata successfully obtained!\nThe process took: ",
-             round(Sys.time()-t0) ," seconds"))
+             round(Sys.time()-t0) ," seconds")) # Yeah!
 }
 
 # Script --------------------------------------------------------------------------------------
