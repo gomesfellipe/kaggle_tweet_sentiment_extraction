@@ -1,0 +1,62 @@
+---
+title: "Tweet Sentiment Extraction"
+subtitle: "Extract support phrases for sentiment labels"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Project authors and participants:
+
+  * [Fellipe Gomes](https://github.com/gomesfellipe) (Estatístico - UFF, Cientista de Dados - FGV IBRE) 
+  * [Rumenick]() ()
+  * [Luiz]()
+  
+# Problem Definition
+
+<!-- premissas: -->
+<!-- Pontos de reflexao -->
+<!-- Problemas de corte nos textos selecionados não terão impacto sobre o a medida Jaccard final -->
+ <!-- O txto selecionado foi obtido por um modelo e elesq ueremo comparar os resultados ou um humano apenas copiou e colou  -->
+
+
+# Available data
+
+# Exploratory Analysis
+
+<!-- Metaanalise -->
+<!-- Tweets que sao iguais -->
+<!-- Texto em branco ou NA? -->
+<!-- Tamanho do textos -->
+<!-- numero de palavras -->
+<!-- Numero de caracteres iguais entre text e selected -->
+<!-- palavras que mais coocorrem -->
+
+
+<!-- Calcular Jaccard entre os textos para cada sentimento -->
+<!-- sentimento neutro tem jaccard muito alto?  -->
+<!-- se sim retorna o texto inteiro logo (comparar jaccard, n de palavras, n de letras) -->
+<!-- Acredito que neutral ja seja bastante parecido -->
+
+# Modeling
+
+<!-- estrategias: -->
+<!-- Converter caracteresde smiles para tokens especiais -->
+<!-- NER - Spacy,  -->
+<!-- Word2vec pra vetorizar -->
+
+<!-- baseline: todo texto (positive, neutral e negative) -->
+
+
+# Conclusion
+  
+# References
+
+<https://www.kaggle.com/nkoprowicz/a-simple-solution-using-only-word-counts>
+<https://www.kaggle.com/khoongweihao/feature-engineering-lightgbm-model-starter-kit>
+<https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/139803>
+<https://www.kaggle.com/jonathanbesomi/question-answering-starter-pack>
+
