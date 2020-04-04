@@ -1,6 +1,7 @@
 ---
 title: "Tweet Sentiment Extraction"
 subtitle: "Baseline model in R"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
@@ -31,7 +32,12 @@ knitr::knit_hooks$set(
 )
 ```
 
-Author: [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL) 
+Project authors and participants:
+
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
+
 
 <p align="right"><span style="color:firebrick">If you liked the kernel dont forget the upvote! <i class="fas fa-hand-peace"></i></span> </p>
 
@@ -63,11 +69,12 @@ library(quanteda)   # textmining
 library(knitr)      # print table
 library(kableExtra) # custom table
 library(ggplot2)    # elegant plot
+library(GGally)     # Pairs
 library(gghalves)   # half plot
 theme_set(theme_bw()) # set theme
 
 # getting data:
-train_data <- read_csv("data/train.csv")
+train_data <- read_csv("../data/train.csv")
 ```
 
 Load functions developed in R to obtain some text metadata:
@@ -261,12 +268,15 @@ Lets see:
 
 ```{r}
 train_metadata %>% 
-  select(sentiment, jaccard, text_len:text_atpeople) %>% 
+  select(sentiment, jaccard, 
+         text_len, text_n_words, text_npunc, text_numbers, text_hashtags, text_links,
+         sel_text_len, sel_text_n_words, sel_text_npunc, sel_text_numbers, sel_text_hashtags
+         ) %>% 
   gather(key, value, -sentiment) %>% 
   ggplot(aes(x = key, y = value, fill = sentiment))+
   geom_half_boxplot(side = "l", center = TRUE, errorbar.draw = FALSE)+
   geom_half_violin(side = "r")+
-  facet_wrap(~key, scales = "free")+
+  facet_wrap(~key, scales = "free", nrow = 3)+
   theme(legend.position = "botton")
 ```
 
@@ -276,6 +286,21 @@ Some insights after analyzing the metadata:
 * The `text_atpeople`,` text_hashtags` `text_links` attributes are not present in most texts;
 * The text size (both number of words and characters) is very similar in all cases;
 * None of the texts have RT.
+
+Let's see if some of the metadata attributes are correlated with each other (spearman correlation)
+
+```{r}
+train_metadata %>% 
+  select(-textID, -text, -sel_text, -sentiment, -text_retweet,
+         -text_clean, -text_na, -equal_texts, -starts_with("sel")) %>% 
+  ggpairs(upper = list(continuous = wrap("cor", method = "spearman")))
+```
+
+Some interpretations:
+
+* It appears that only `text_nwords` has a moderate correlation with the number of `text_npunc`;
+* Most `starts` are at the beginning of the sentence, unlike the `end`;
+* `text_links` usually only appear once.
 
 # Baseline model
 
@@ -288,7 +313,7 @@ print(glue::glue("Jaccard similarity in training data: {round(mean(train_metadat
 Save the submission file using full `text`column to obtain a reference jaccard metric as starting point for the development of more complex models:
 
 ```{r}
-read_csv("data/test.csv") %>% 
+read_csv("../data/test.csv") %>% 
   select(textID, selected_text = text) %>% 
   write_csv("submission.csv")
 ```

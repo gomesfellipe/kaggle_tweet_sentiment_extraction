@@ -1,0 +1,30 @@
+---
+title: "kernel_ml_rumenick"
+author: "MTBR - ModelThinkingBR"
+date: "4/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# packages
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(quanteda)   # textmining
+library(knitr)      # print table
+library(kableExtra) # custom table
+library(ggplot2)    # elegant plot
+library(GGally)     # Pairs
+library(gghalves)   # half plot
+theme_set(theme_bw()) # set theme
+
+# getting data:
+train_data <- read_csv("../data/train.csv")
+source("../functions.R")
+metadata <- get_metadata(train_data)
+
+```

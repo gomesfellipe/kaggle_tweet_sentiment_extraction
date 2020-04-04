@@ -4,9 +4,9 @@
 
 Project authors and participants:
 
-  * [Fellipe Gomes](https://github.com/gomesfellipe) (Estatístico - UFF, Cientista de Dados - FGV IBRE) 
-  * [Rumenick]()
-  * [Luiz]()
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
 
 Text obtained in the project description:
 

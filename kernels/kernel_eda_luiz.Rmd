@@ -1,0 +1,62 @@
+---
+title: "Tweet Sentiment Extraction"
+subtitle: "Exploratory analysis of texts"
+date: "`r format(Sys.time(), '%d %B, %Y')`""
+output: html_document
+---
+
+Project authors and participants:
+
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
+
+
+<p align="right"><span style="color:firebrick">If you liked the kernel dont forget the upvote! <i class="fas fa-hand-peace"></i></span> </p>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# packages
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(quanteda)   # textmining
+library(knitr)      # print table
+library(kableExtra) # custom table
+library(ggplot2)    # elegant plot
+library(GGally)     # Pairs
+library(gghalves)   # half plot
+theme_set(theme_bw()) # set theme
+
+# getting data:
+train_data <- read_csv("../data/train.csv")
+source("../functions.R")
+metadata <- get_metadata(train_data)
+```
+
+# Available data
+
+```{r}
+train_data
+```
+
+
+# Exploratory Analysis
+
+<!-- Metaanalise -->
+<!-- Tweets que sao iguais -->
+<!-- Texto em branco ou NA? -->
+<!-- Tamanho do textos -->
+<!-- numero de palavras -->
+<!-- Numero de caracteres iguais entre text e selected -->
+<!-- palavras que mais coocorrem -->
+<!-- n de exclamacoes correlacionado com sentimento negativo? -->
+
+
+<!-- Calcular Jaccard entre os textos para cada sentimento -->
+<!-- sentimento neutro tem jaccard muito alto?  -->
+<!-- se sim retorna o texto inteiro logo (comparar jaccard, n de palavras, n de letras) -->
+<!-- Acredito que neutral ja seja bastante parecido -->

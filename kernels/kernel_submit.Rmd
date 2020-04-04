@@ -11,11 +11,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Project authors and participants:
 
-  * [Fellipe Gomes](https://github.com/gomesfellipe) (Estatístico - UFF, Cientista de Dados - FGV IBRE) 
-  * [Rumenick]() ()
-  * [Luiz]()
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
   
 # Problem Definition
+
+<!-- Descrever fonte dos dados, processo manual -->
 
 <!-- premissas: -->
 <!-- Pontos de reflexao -->
@@ -56,6 +58,8 @@ Project authors and participants:
 
 
 # Conclusion
+
+<!-- TODO cruzar com sentimentos mais refinados mais para frente -->
   
 # References
 
