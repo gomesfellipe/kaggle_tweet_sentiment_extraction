@@ -54,6 +54,7 @@ train_data
 <!-- Numero de caracteres iguais entre text e selected -->
 <!-- palavras que mais coocorrem -->
 <!-- n de exclamacoes correlacionado com sentimento negativo? -->
+<!-- Quais tweets usam o texto inteiro ou uma palavra -->
 
 
 <!-- Calcular Jaccard entre os textos para cada sentimento -->
