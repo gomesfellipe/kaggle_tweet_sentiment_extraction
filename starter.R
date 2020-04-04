@@ -4,6 +4,7 @@
 # todo: n de palavras unicas
 # todo: n de maiusculas
 # todo: % do texto que foi coletado
+# todo: usar busca de palavras cm sentimento negativo e retornar trexos com essas frases
 
 # todo: comferir se precisa melhorar funcao de limpeza (one grams mais frequentes)
 
@@ -21,14 +22,14 @@ library(stringr)
 library(quanteda)
 
 train_data <- read_csv("data/train.csv")
-test_data <- read_csv("data/train.csv")
+# test_data <- read_csv("data/train.csv")
 
 # failures source: https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/138272
 source("functions.R")
 
 # get metadata:
-train_metadata <- get_metadata(train_data) # aguarde um pouco..
-test_metadata <- get_metadata(test_data) # aguarde um pouco..
+# train_metadata <- get_metadata(train_data) # aguarde um pouco..
+# test_metadata <- get_metadata(test_data) # aguarde um pouco..
 
 
 
@@ -43,6 +44,10 @@ train_data <-
     str_trim() %>%
     str_squish()) # segundo as regras nao faz diferenca
 
+
+
+vader::getVader(train_data$text[1])
+
 # Amostrar um tweet que nao seja neutro
 non_neutral <-
   train_data %>%
@@ -54,6 +59,11 @@ glue::glue("Non-neutral are {round((nrow(non_neutral)*100) / nrow(train_data),2)
 ind <- sample(1:2, size = nrow(non_neutral), replace = T, prob = c(.005, .95))
 res <- parallel::mclapply(non_neutral$text[ind == 1], ntoken, mc.cores = 4)
 ind_max <- which.max(unlist(res))
+
+# selecionado:
+non_neutral[ind_max, ]$text
+non_neutral[ind_max, ]$selected_text
+non_neutral[ind_max, ]$sentiment
 
 vader_compound <- function(x) {
   # normalized, weighted composite score
@@ -102,5 +112,7 @@ make_dataset <- function(x) {
 }
 
 results <- make_dataset(non_neutral[ind_max, ])
+
+
 
 non_neutral$selected_text[ind_max]
