@@ -13,13 +13,14 @@
 # packages
 library(readr)
 library(dplyr)
+library(tidyr)
 library(purrr)
 library(stringr)
 library(quanteda)
-library(foreach)
-library(doParallel)
-cl <- makeCluster(detectCores()-1, outfile="")
-registerDoParallel(cl)
+# library(foreach)
+# library(doParallel)
+# cl <- makeCluster(detectCores()-1, outfile="")
+# registerDoParallel(cl)
 
 
 train_data <- read_csv("data/train.csv")
@@ -74,82 +75,93 @@ train_metadata <- get_metadata(train_data) # aguarde um pouco..
 # preproces2 ----
 train_parsed <- readRDS("data/train_parsed.rds")
 
-# remover linhas onde all_ngram eh igual do texto selecionado
-# porem o jaccard nao é igual a 1 para nao 'confundir' o algoritmo
-ind <- train_parsed %>% 
-  filter(all_ngrams == sel_text & jaccard != 1) %>% 
-  pull(textID) %>% unique()
-
-# aplicar filtro
-train_parsed %>% 
-  filter(ngram_vader == text_sentiment)
-
-# remover linhas aonde vader nao bate com o sentimento verdadeiro da frase
-train_parsed <- 
-  train_parsed %>% 
-  filter(!textID %in% ind) %>% 
-  filter(ngram_vader == text_sentiment)
-
 # combinar resultado com metadados e 
 # selecionar colunas interessantes para modelagem
 train_parsed <- 
   train_parsed %>% 
   left_join(train_metadata, by = c("textID", "text", "sel_text", "jaccard")) %>% 
-  select(textID, text, sel_text, all_ngrams, text_n_words, ngram_len, ngram_prop, ngram_vader, 
+  select(textID, text_sentiment, text, sel_text, all_ngrams, text_n_words, ngram_len, ngram_prop, ngram_vader, 
          dif_text_ngram, dif_ngram_vader,text_nunique_words, text_len:text_atpeople, jaccard)
 
 # preencher metadados para todas as ngrams
 train_parsed <- 
   train_parsed %>% 
-  # group_by(textID) %>% 
-  # arrange(-ngram_len) %>% 
   fill(text_nunique_words:text_atpeople,.direction = "up")
-  # ungroup()
+
+# remover dados de treino onde ocorreram erros na marcacao do texto selecionado, 
+# que nao respeita o espaco em branco como espacador
+train_parsed <- 
+  train_parsed %>% 
+  group_by(textID) %>% 
+  nest() %>% 
+  mutate(to_remove = map_lgl(data,~! any(.x$sel_text == .x$all_ngrams))) %>% 
+  filter(to_remove != T) %>% 
+  select(-to_remove) %>% 
+  unnest(cols = c(data))
   
+# remover linhas onde all_ngram eh igual do texto selecionado
+# porem o jaccard nao é igual a 1 para nao 'confundir' o algoritmo
+# e vice-versa
+ind <- train_parsed %>% 
+  filter(all_ngrams == sel_text & jaccard != 1) %>% 
+  filter(jaccard == 1 & all_ngrams != sel_text) %>% 
+  pull(textID) %>% unique()
+
+train_parsed <-
+  train_parsed %>%
+  filter(!textID %in% ind)
+
+# remover linhas aonde vader nao bate com o sentimento verdadeiro da frase
+# (Opcional, reduz consideravelmente o tamanho da base)
+train_parsed <-
+  train_parsed %>%
+  filter(ngram_vader == text_sentiment)
+
 View(train_parsed)
+
 # Rascunho ------------------------------------------------------------------------------------
-
-# Mantenha o rascunho daqui para baixo
-
-
-vader::getVader(train_pp$text[1])
+# Mantenha o rascunho daqui para baixo!
 
 
-
-# Selecionar o maior twitter de uma amostra aleatoria:
-ind <- sample(1:2, size = nrow(train_pp), replace = T, prob = c(.005, .95))
-res <- parallel::mclapply(train_pp$text[ind == 1], ntoken, mc.cores = 4)
-ind_max <- which.max(unlist(res))
-
-# selecionado:
-train_pp[ind_max, ]$text
-train_pp[ind_max, ]$selected_text
-train_pp[ind_max, ]$sentiment
-
-# para o texto amostrado
-results <- make_dataset(train_pp = train_pp[ind_max, ], train_pp[ind_max, ]$textID)
-
-# Combinar metadata com parsed
-left_join(
-  train_parsed %>% select(-text_sentiment),
-  train_metadata, by = c( "textID", "text", "sel_text")
-) %>% View()
-
-
-mean(train_metadata$text_n_words)
-# 15
-
-pos_text <- 
-  tibble(x = str_split(text, " ")[[1]] %>% .[. %in% hash_emoticons$x]) %>% 
-  left_join(hash_emoticons[x %in% emoticon,], by = "x")
-
-substr(text, 4, 4) <- "t"
-
-text = "goddamn dust out -), but =) I wore ;) out a clip on the camera panel so I had to glue it shut"
-pos_emoticon <- 
-pos_emoticon <- str_split(text, " ")[[1]] %>% {hash_emoticons[. %in% hash_emoticons$x,]}
-
-text_splited <- str_split(text, " ")[[1]]
-emoticon_found <- hash_emoticons[hash_emoticons$x %in%text_splited]
+# rascunho fellipe ----------------------------------------------------------------------------
+# vader::getVader(train_pp$text[1])
+# 
+# 
+# 
+# # Selecionar o maior twitter de uma amostra aleatoria:
+# ind <- sample(1:2, size = nrow(train_pp), replace = T, prob = c(.005, .95))
+# res <- parallel::mclapply(train_pp$text[ind == 1], ntoken, mc.cores = 4)
+# ind_max <- which.max(unlist(res))
+# 
+# # selecionado:
+# train_pp[ind_max, ]$text
+# train_pp[ind_max, ]$selected_text
+# train_pp[ind_max, ]$sentiment
+# 
+# # para o texto amostrado
+# results <- make_dataset(train_pp = train_pp[ind_max, ], train_pp[ind_max, ]$textID)
+# 
+# # Combinar metadata com parsed
+# left_join(
+#   train_parsed %>% select(-text_sentiment),
+#   train_metadata, by = c( "textID", "text", "sel_text")
+# ) %>% View()
+# 
+# 
+# mean(train_metadata$text_n_words)
+# # 15
+# 
+# pos_text <- 
+#   tibble(x = str_split(text, " ")[[1]] %>% .[. %in% hash_emoticons$x]) %>% 
+#   left_join(hash_emoticons[x %in% emoticon,], by = "x")
+# 
+# substr(text, 4, 4) <- "t"
+# 
+# text = "goddamn dust out -), but =) I wore ;) out a clip on the camera panel so I had to glue it shut"
+# pos_emoticon <- 
+# pos_emoticon <- str_split(text, " ")[[1]] %>% {hash_emoticons[. %in% hash_emoticons$x,]}
+# 
+# text_splited <- str_split(text, " ")[[1]]
+# emoticon_found <- hash_emoticons[hash_emoticons$x %in%text_splited]
 
 
