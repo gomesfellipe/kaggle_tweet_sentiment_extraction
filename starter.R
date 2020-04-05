@@ -7,6 +7,7 @@
 # todo: usar busca de palavras cm sentimento negativo e retornar trexos com essas frases
 # todo: usar a palavra que vem antes e que vem depoois (3 submissoes)
 # todo: montar baseline para modelo de ml fazendo uma selecao aleatoria entre as ngrams 
+# todo: transformar emoticons em palavras antes de aplicar o vader
 # (incluir regra para quando for neutro e realizar um teste depois para saber se a pena usar o neutro)
 # todo: calcular kappa para saber se o vader esta acertando como agnt espera
 # todo: comferir se precisa melhorar funcao de limpeza (one grams mais frequentes)
@@ -64,7 +65,7 @@ train_pp[ind_max, ]$selected_text
 train_pp[ind_max, ]$sentiment
 
 # para o texto amostrado
-results <- make_dataset(train_pp = train_pp[ind_max, ])
+results <- make_dataset(train_pp = train_pp[ind_max, ], train_pp[ind_max, ]$textID)
 
 # para todos nao neutros:
 
