@@ -21,7 +21,8 @@ library(stringr)
 library(quanteda)
 library(foreach)
 library(doParallel)
-cl <- makeCluster(detectCores() - 1)
+cl <- makeCluster(detectCores()-1, outfile="")
+registerDoParallel(cl)
 
 
 train_data <- read_csv("data/train.csv")
@@ -74,8 +75,7 @@ nested_train_pp <-
   group_by(textID) %>% 
   tidyr::nest() 
 
-cl <- makeCluster(detectCores()-1, outfile="")
-registerDoParallel(cl)
+
 
 t0 <- Sys.time()
 train_parsed <-  
@@ -99,4 +99,8 @@ Sys.time() - t0
 saveRDS(train_parsed, "data/train_parsed_1_1000.rds")
 stopCluster(cl)
 
+left_join(
+  train_parsed_1_1000 %>% select(-text_sentiment) %>% rename(text = txt, sel_text = sel_txt),
+  train_metadata, by = c( "textID", "text", "sel_text")
+) %>% View()
 
