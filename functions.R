@@ -89,12 +89,21 @@ get_metadata <- function(x) {
     x %>%
     # rename selected_text to sel_text
     rename(sel_text = selected_text) %>%
+    # row operations
+    rowwise() %>% 
+    mutate(
+      text_nwords = length(str_split(text, pattern = " ")[[1]]),
+      text_nunique_words = length(unique(str_split(text, pattern = " ")[[1]])),
+      sel_text_nwords = length(str_split(sel_text, pattern = " ")[[1]]),
+      sel_text_nunique_words = length(unique(str_split(sel_text, pattern = " ")[[1]])),
+      ) %>% 
+    ungroup() %>% 
     # features engineering
     mutate(
       # on text
       text_na = is.na(text),
       text_len = str_length(text),
-      text_n_words = length(str_split(text, pattern = " ", )[[1]]),
+      text_nupper = str_count(text, "[A-Z]"),
       text_npunc = str_count(text, "[[:punct:]]"),
       text_numbers = str_count(text, "[[:digit:]]"),
       text_links = str_count(text, "http(s|).*"),
@@ -104,8 +113,8 @@ get_metadata <- function(x) {
       text_clean = clean_text(text),
       # on sel_text
       sel_text_na = is.na(sel_text),
+      sel_text_nupper = str_count(sel_text, "[A-Z]"),
       sel_text_len = str_length(sel_text),
-      sel_text_n_words = length(str_split(sel_text, pattern = " ", )[[1]]),
       sel_text_npunc = str_count(sel_text, "[[:punct:]]"),
       sel_text_numbers = str_count(sel_text, "[[:digit:]]"),
       sel_text_links = str_count(sel_text, "http(s|).*"),
@@ -123,7 +132,7 @@ get_metadata <- function(x) {
                 map2_dfr(
                   .$text, .$sel_text,
                   ~ { # include \\ before special characters before the search
-                    .y <- str_replace_all(.y, "([[:punct:]]|\\*)", "\\\\\\1")
+                    .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1")
                     str_locate(.x, .y) %>%
                       as_tibble() } ) ) } %>%
     select(textID, text, sel_text, sentiment, start, end, jaccard, 
@@ -185,7 +194,7 @@ make_dataset <- function(train_pp, id) {
       dif_prop_text_ngram = (text_n_words - ngram_len) / text_n_words,
       dif_ngram_vader = map2_chr(x$text, all_ngrams, ~ {
         tryCatch(str_remove_all(.x, .y),
-                 error = function(e){str_remove_all(.x,str_replace_all(.y, "([[:punct:]]|\\*|\\+)", "\\\\\\1"))})
+                 error = function(e){str_remove_all(.x,str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1"))})
       }),
       dif_ngram_vader = map_chr(dif_ngram_vader, vader_compound)
     ) %>%

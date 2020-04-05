@@ -47,12 +47,20 @@ Project authors and participants:
 
 # Modeling
 
+<!-- estrategias: -->
+
+
 <!-- baseline: todo texto (positive, neutral e negative) -->
 
-<!-- estrategias: -->
+<!-- usar busca de palavras cm sentimento negativo e retornar trexos com essas frases -->
+<!-- usar a palavra que vem antes e que vem depoois (3 submissoes) -->
+
 <!-- Word2vec pra vetorizar -->
+
 <!-- NER - Spacy,  -->
+
 <!-- Text summarization -->
+
 <!-- BERT -->
 
 
