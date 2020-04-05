@@ -19,7 +19,8 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(quanteda)
-library(parallel)
+library(foreach)
+library(doParallel)
 cl <- makeCluster(detectCores() - 1)
 
 
@@ -69,19 +70,33 @@ results <- make_dataset(train_pp = train_pp[ind_max, ])
 # Create a cluster with 1 fewer cores than are available. Adjust as necessary
 
 nested_train_pp <- 
-  train_pp[1:50,] %>% 
+  train_pp[1:1000,] %>% 
   group_by(textID) %>% 
   tidyr::nest() 
 
-parsed <- parLapply(cl, nested_train_pp$data, 
-               function(.x){
-                 source("functions.R")
-                 # make_dataset(.x)
-                 tryCatch(make_dataset(.x), error = function(e){print(e);print(.x); NA})
-               })
-stopCluster()
+cl <- makeCluster(detectCores()-1, outfile="")
+registerDoParallel(cl)
 
-# Combinar resultados em um unico data.frame
-parsed %>% 
-  map_dfr(~as_tibble(as.data.frame(.x))) %>% View()
+t0 <- Sys.time()
+train_parsed <-  
+  foreach(x=nested_train_pp$data,
+          y=nested_train_pp$textID,
+          n=1:length(nested_train_pp$textID),
+          # .export = ls(),
+          # .packages = c(dplyr, purrr, stringr),
+          # .errorhandling = c("pass"),
+          .combine = rbind,
+          .inorder = F
+  ) %dopar% {
+    tryCatch({
+      cat(paste0("Parsing tweet ",n,": ", x$text," (", x$sentiment, ") \n"))
+      make_dataset(x, y)
+    }, error = function(e){print(paste0("Error in tweet: ", y, "\n", 
+                                  "caused the error: '", e, "'\n")); NA})
+  
+  }
+Sys.time() - t0
+saveRDS(train_parsed, "data/train_parsed_1_1000.rds")
+stopCluster(cl)
+
 
