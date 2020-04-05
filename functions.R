@@ -153,7 +153,7 @@ vader_compound <- function(x) {
   }
 }
 
-make_dataset <- function(train_pp) {
+make_dataset <- function(train_pp, id) {
   require(dplyr)
   require(purrr)
   require(stringr)
@@ -169,7 +169,7 @@ make_dataset <- function(train_pp) {
   text_vader = x$text %>% map_chr(vader_compound)
   
   tibble(
-    # txt_id = x$textID,
+    textID = id,
     txt = x$text,
     sel_txt = selected_text,
     txt_len = str_split(x$text, pattern = " ", )[[1]] %>% length(),
