@@ -134,3 +134,62 @@ get_metadata <- function(x) {
   
   return(x)
 }
+
+vader_compound <- function(x) {
+  # normalized, weighted composite score
+  # https://github.com/cjhutto/vaderSentiment#about-the-scoring
+  if (str_length(x) == 0) {
+    NA
+  } else {
+    tryCatch(
+      vader::getVader(x) %>%
+        .[names(.) == "compound"] %>%
+        { case_when(. >= 0.05  ~ "positive",
+                    . <= -0.05 ~ "negative",
+                    T          ~ "neutral")
+        },
+      error = function(e) NA
+    )
+  }
+}
+
+make_dataset <- function(train_pp) {
+  require(dplyr)
+  require(purrr)
+  require(stringr)
+  
+  x <- train_pp
+  
+  if(!is.null(x$selected_text)){
+    selected_text = x$selected_text
+  }else{
+    selected_text = NA
+  }
+  
+  text_vader = x$text %>% map_chr(vader_compound)
+  
+  tibble(
+    # txt_id = x$textID,
+    txt = x$text,
+    sel_txt = selected_text,
+    txt_len = str_split(x$text, pattern = " ", )[[1]] %>% length(),
+    text_sentiment = x$sentiment,
+    text_vader = text_vader,
+    all_ngrams = map(1:txt_len, ~ tau::textcnt(x$text, method = "string", split = " ", n = .x, tolower = FALSE) %>% names()) %>% unlist()
+  ) %>%
+    mutate(
+      ngram_len = all_ngrams %>% map_dbl(~ str_split(.x, pattern = " ", )[[1]] %>% length()),
+      ngram_prop = ngram_len / txt_len,
+      ngram_vader = all_ngrams %>% map_chr(vader_compound),
+      dif_txt_ngram = txt_len - ngram_len,
+      dif_prop_txt_ngram = (txt_len - ngram_len) / txt_len,
+      dif_ngram_vader = map2_chr(x$text, all_ngrams, ~ {
+        tryCatch(str_remove_all(.x, .y),
+                 error = function(e){str_remove_all(.x,str_replace_all(.y, "([[:punct:]]|\\*|\\+)", "\\\\\\1"))})
+      }),
+      dif_ngram_vader = map_chr(dif_ngram_vader, vader_compound)
+    ) %>%
+    rowwise() %>%
+    mutate(jaccard = jaccard(selected_text, all_ngrams)) %>% # y
+    ungroup()
+}
