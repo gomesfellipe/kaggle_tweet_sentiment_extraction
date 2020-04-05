@@ -64,7 +64,7 @@ train_pp[ind_max, ]$selected_text
 train_pp[ind_max, ]$sentiment
 
 # para o texto amostrado
-results <- make_dataset(train_pp = train_pp[ind_max, ])
+results <- make_dataset(train_pp = train_pp[ind_max, ], train_pp[ind_max, ]$textID)
 
 # para todos nao neutros:
 
@@ -100,7 +100,13 @@ saveRDS(train_parsed, "data/train_parsed_1_1000.rds")
 stopCluster(cl)
 
 left_join(
-  train_parsed_1_1000 %>% select(-text_sentiment) %>% rename(text = txt, sel_text = sel_txt),
+  train_parsed %>% select(-text_sentiment),
   train_metadata, by = c( "textID", "text", "sel_text")
 ) %>% View()
+
+
+
+
+
+
 
