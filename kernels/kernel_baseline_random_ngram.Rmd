@@ -1,0 +1,219 @@
+---
+title: "Tweet Sentiment Extraction"
+subtitle: "Baseline model | Random n-gram | Parallel R"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, result=FALSE, cache=FALSE)
+knitr::knit_hooks$set(
+  source = function(x, options) {
+    hook.r = function(x, options) {
+      fence <- '```'
+      language = tolower(options$engine)
+      if (language == 'node') language = 'javascript'
+      if (!options$highlight) language = 'text'
+      if(!is.null(options$foldcode)) {
+        paste0('\n\n', "<details><summary>Source</summary>\n", fence, language, '\n', x, fence,  '\n\n', "</details>\n")
+      } else {
+        paste0('\n\n', fence, language, '\n', x, fence,  '\n\n')
+      }
+    }
+    x = knitr:::hilight_source(x, 'markdown', options)
+    hook.r(
+      paste(c(
+        x, 
+        ''
+      ), collapse = '\n'), 
+      options
+    )
+  }
+)
+```
+
+Project authors and participants:
+
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
+
+
+<p align="right"><span style="color:firebrick">If you liked the kernel dont forget the upvote! <i class="fas fa-hand-peace"></i></span> </p>
+
+
+# Problem Definition
+
+This competition presents a slightly different challenge when we talking about sentiment analysis. Usually we have a dataset with some texts labeled as sentiments (negative, neutral and positive) and we develop a model that is able to estimate the sentiment of a text that is not labeled.
+
+Here we are interested in predicting the sequence of words that best supports the feeling of the tweet (including punctuation, etc). In addition, the text can only be divided by white space. This brings up the reflection on whether it is a big deal to apply the traditional methods of cleaning and analyzing data for the application of machine learning models or whether we will have even more interesting results using alternative approaches like [NER](https://en.wikipedia.org/wiki/Named-entity_recognition) or slightly more complex approaches.
+
+I never carried out an analysis of this in my job so before I started developing the baseline I did a quick "literature review" to find different approaches to solve this type of task and found some options like [Question Answering](https://web.stanford.edu/class/cs124/lec/watsonqa.pdf) (with [BERT](https://ai.googleblog.com/2018/11/open-sourcing-bert-state-of-art-pre.html), [XLNET](https://www.google.com/search?q=XLNET&oq=XLNET&aqs=chrome..69i57j0l6j69i60.499j0j4&sourceid=chrome&ie=UTF-8), [XLM](https://github.com/facebookresearch/XLM), or [DistilBERT](https://arxiv.org/abs/1910.01108)) or [Text summarization](https://ocw.mit.edu/courses/electrical-engineering-and-computer-science/6-864-advanced-natural-language-processing-fall-2005/lecture-notes/lec25.pdf) approache.
+
+After submitting the baseline model, I will develop new kernels with some friends to evaluate new models using R and Python!
+
+I hope you enjoy it! <i class="fas fa-grin-beam"></i>
+
+# Available data
+
+Loading train dataset and packages used in the kernel:
+
+```{r}
+# packages
+library(readr)      # read data
+library(dplyr)      # manipulate data
+library(tidyr)      # data wrangling
+library(purrr)      # functional programing 
+library(stringr)    # string manipule
+library(tau)        # split text by " "
+library(foreach)    # paralel in R
+library(doParallel) # active parallel
+
+# path <- "../input/tweet-sentiment-extraction" # kaggle
+path <- "../data" # local 
+
+test_data <- read_csv(file.path(path,"test.csv"))
+```
+
+Load functions developed in R to obtain some text metadata:
+
+(Click "<i class="fas fa-play"></i>Source" to show the code of function `get_parse()`)
+
+```{r, foldcode=TRUE}
+# Version 1 Functions to competition: 
+# kaggle.com/c/tweet-sentiment-extraction/
+
+#' Get parsed dataset
+#'
+#' function developed to get parse of twitter dataset
+#' https://www.kaggle.com/c/tweet-sentiment-extraction/data
+#'
+#' @param data_pp = dataset pre processed
+#' @return some dataset ngrams analysis
+#' @example
+#' train_parse <- get_parse(train_pp)
+#'
+get_parse <- function(data_pp, id) {
+  require(dplyr)
+  require(purrr)
+  require(stringr)
+  require(tau)
+  
+  x <- data_pp
+  
+  if(!is.null(x$selected_text)){
+    selected_text = x$selected_text
+  }else{
+    selected_text = NA
+  }
+  
+  tibble(
+    textID = id,
+    text = x$text,
+    sel_text = selected_text,
+    text_n_words = str_split(x$text, pattern = " ", )[[1]] %>% length(),
+    all_ngrams = map(1:text_n_words,
+                     ~ textcnt(x$text, method = "string", split = " ",
+                               n = .x, tolower = FALSE) %>% names()) %>% unlist()
+  ) 
+}
+```
+
+</br>
+
+See the first 10 lines of the imported dataset:
+
+```{r}
+test_data %>% head(10)
+```
+
+The `test_data` dataset provided has `r dim(test_data)[1]` rows and `r dim(test_data)[2]` columns.
+
+Note that we will not import the training dataset as it will be a model of random selection of ngrams
+
+# Baseline model: random selection of ngrams
+
+First we will extract only the texts whose feeling is neutral because, as I presented in exploratory analysis of kernel: [https://www.kaggle.com/gomes555/baseline-full-text-get-metadata-with-tidyverse-r#exploratory-data-analysis](https://www.kaggle.com/gomes555/baseline-full-text-get-metadata-with-tidyverse-r#exploratory-data-analysis) where the jaccard similarity is greater than 0.90 when using all the text.
+
+```{r}
+test_neutral <- test_data %>% filter(sentiment == "neutral")
+```
+
+Then we will do a brief pre-processing of the data by removing extra white spaces (as we will use the same split method presented in the competition description: a blank space)
+
+```{r}
+test_pp <-
+  test_data %>%
+  mutate_at(c("text"), ~ .x %>% str_trim() %>% str_squish()) %>% 
+  filter(!is.na(text)) %>%
+  filter(sentiment != "neutral") 
+```
+
+`r glue::glue("Non-neutral are {round((nrow(test_pp)*100) / nrow(test_data),2)}% of full dataset")`
+
+The reduction of the dataset only in texts with non-neutral records will make the process of extracting ngrams faster, since a text of up to 130 characters such as on twitter can generate a huge amount of possible ngrams.
+
+To work more efficiently in this processing we will use parallel programming in R with the foreach package.
+
+First we will nest the data according to the textID of each text and then we will start a loop that will collect all possible ngrams of each token divided by a blank space.
+
+```{r}
+nested_test_pp <-
+  test_pp %>%
+  group_by(textID) %>%
+  tidyr::nest() 
+
+cl <- makeCluster(4) # kaggle has 32 cores? =D
+registerDoParallel(cl)
+
+t0 <- Sys.time()
+test_parsed <-
+  foreach(x=nested_test_pp$data,
+          y=nested_test_pp$textID,
+          n=1:length(nested_test_pp$textID),
+          .export = ls(),
+          .packages = c('dplyr', 'purrr', 'stringr', 'tidyr'),
+          # .errorhandling = c("pass"),
+          .combine = rbind,
+          .inorder = F
+  ) %dopar% {
+    cat(paste0("Parsing tweet ",n,": ", x$text," (", x$sentiment, ") \n"))
+    get_parse(x, y)
+  }
+stopCluster(cl)
+
+```
+
+Time difference of `r round(as.numeric(Sys.time() - t0),2)` mins
+
+After collecting all the n-grams, we can discard the ngrams that have links because I am assuming that the link will not be associated with a feeling.
+
+And then we're going to generate a random sample of size 1 from a uniform distribution between 1 and the amount of ngrams for each textID
+
+```{r}
+sub <- 
+  test_parsed  %>%
+  # filter(ngram_vader == text_sentiment) %>% I preferred to keep random
+  filter(! str_detect(all_ngrams, "http(s|).*") ) %>% 
+  group_by(textID) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  transmute(textID, selected_text = map_chr(data, ~{
+    set.seed(123) # reprodutibility
+    aleatory_ngram <- round(runif(1, 1, length(.$all_ngrams)))
+    .$all_ngrams %>% .[aleatory_ngram]
+  })) 
+```
+
+Finally, we will combine the results with the full texts of neutral sentiment and combine with the sample submission file to avoid problems from here
+
+```{r}
+submission <- read_csv(file.path(path,"sample_submission.csv"))
+
+submission %>% 
+  select(-selected_text) %>% 
+  left_join(bind_rows(sub, transmute(test_neutral, textID, selected_text = text)))  %>% 
+  write_csv("submission.csv")
+```
+
+<i class="fas fa-check-circle"></i> Yeahh!! Lets go submmit!

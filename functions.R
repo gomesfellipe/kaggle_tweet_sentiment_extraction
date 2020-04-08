@@ -85,58 +85,79 @@ get_metadata <- function(x) {
   t0 <- Sys.time() # to print time
   cat("Getting metadata, please wait ..\n")
   
+  is_test <- suppressWarnings(is.null(x$selected_text))
+  
   x <-
-    x %>%
-    # rename selected_text to sel_text
-    rename(sel_text = selected_text) %>%
+    x %>%{
+      if(!is_test){
+        # rename selected_text to sel_text
+        rename(., sel_text = selected_text) %>% 
+          mutate_at(c("text", "sel_text"),
+                    ~ .x %>% str_trim() %>% str_squish())
+      }else{
+        mutate(., text = text %>% str_trim() %>% str_squish())
+      }
+    } %>%
     # row operations
     rowwise() %>% 
     mutate(
       text_nwords = length(str_split(text, pattern = " ")[[1]]),
       text_nunique_words = length(unique(str_split(text, pattern = " ")[[1]])),
-      sel_text_nwords = length(str_split(sel_text, pattern = " ")[[1]]),
-      sel_text_nunique_words = length(unique(str_split(sel_text, pattern = " ")[[1]])),
-      ) %>% 
+      # sel_text_nwords = length(str_split(sel_text, pattern = " ")[[1]]),
+      # sel_text_nunique_words = length(unique(str_split(sel_text, pattern = " ")[[1]])),
+    ) %>% 
     ungroup() %>% 
     # features engineering
     mutate(
       # on text
-      text_na = is.na(text),
+      # text_na = is.na(text),
       text_len = str_length(text),
       text_nupper = str_count(text, "[A-Z]"),
       text_npunc = str_count(text, "[[:punct:]]"),
       text_numbers = str_count(text, "[[:digit:]]"),
-      text_links = str_count(text, "http(s|).*"),
+      # text_links = str_count(text, "http(s|).*"),
       text_hashtags = str_count(text, "#\\w+"),
-      text_retweet = str_count(text, "(RT|via)((?:\\b\\W*@\\w+)+)"),
-      text_atpeople = str_count(text, "@\\w+"),
+      # text_retweet = str_count(text, "(RT|via)((?:\\b\\W*@\\w+)+)"),
+      # text_atpeople = str_count(text, "@\\w+"),
       text_clean = clean_text(text),
-      # on sel_text
-      sel_text_na = is.na(sel_text),
-      sel_text_nupper = str_count(sel_text, "[A-Z]"),
-      sel_text_len = str_length(sel_text),
-      sel_text_npunc = str_count(sel_text, "[[:punct:]]"),
-      sel_text_numbers = str_count(sel_text, "[[:digit:]]"),
-      sel_text_links = str_count(sel_text, "http(s|).*"),
-      sel_text_hashtags = str_count(sel_text, "#\\w+"),
-      sel_text_retweet = str_count(sel_text, "(RT|via)((?:\\b\\W*@\\w+)+)"),
-      sel_text_atpeople = str_count(sel_text, "@\\w+"),
-      sel_text_clean = clean_text(sel_text),
-      # mutual
-      equal_texts = text == sel_text,
-      jaccard = purrr::map2_dbl(text, sel_text, ~ jaccard(.x, .y)),
     ) %>%
     {
-      # add columns start and end sel_text
-      bind_cols(.,
-                map2_dfr(
-                  .$text, .$sel_text,
-                  ~ { # include \\ before special characters before the search
-                    .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1")
-                    str_locate(.x, .y) %>%
-                      as_tibble() } ) ) } %>%
-    select(textID, text, sel_text, sentiment, start, end, jaccard, 
-           text_clean, sel_text_clean, everything())
+      if(!is_test){
+        mutate(.,
+               # on sel_text
+               # sel_text_na = is.na(sel_text),
+               # sel_text_nupper = str_count(sel_text, "[A-Z]"),
+               # sel_text_len = str_length(sel_text),
+               # sel_text_npunc = str_count(sel_text, "[[:punct:]]"),
+               # sel_text_numbers = str_count(sel_text, "[[:digit:]]"),
+               # sel_text_links = str_count(sel_text, "http(s|).*"),
+               # sel_text_hashtags = str_count(sel_text, "#\\w+"),
+               # sel_text_retweet = str_count(sel_text, "(RT|via)((?:\\b\\W*@\\w+)+)"),
+               # sel_text_atpeople = str_count(sel_text, "@\\w+"),
+               sel_text_clean = clean_text(sel_text),
+               # mutual statistics
+               equal_texts = text == sel_text,
+               jaccard = purrr::map2_dbl(text, sel_text, ~ jaccard(.x, .y))) %>% 
+        # add columns start and end sel_text
+        bind_cols(map2_dfr(
+                    .$text, .$sel_text,
+                    ~ { # include \\ before special characters before the search
+                      .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1")
+                      str_locate(.x, .y) %>%
+                        as_tibble() } ) )  
+      }else{
+        .
+      }
+    } %>% {
+      if(!is_test){
+        dplyr::select(., textID, text, sel_text, sentiment, start, end, jaccard, 
+               text_clean, sel_text_clean, everything())    
+      }else{
+        dplyr::select(., textID, text, sentiment, 
+               text_clean, everything())    
+      }
+    }
+    
   
   cat(paste0("Metadata successfully obtained!\nThe process took: ",
              round(Sys.time()-t0) ," seconds")) # Yeah!
@@ -144,6 +165,16 @@ get_metadata <- function(x) {
   return(x)
 }
 
+#' Collect compound Vader measure
+#'
+#' function developed to get parse of twitter dataset
+#' https://www.kaggle.com/c/tweet-sentiment-extraction/data
+#'
+#' @param x = text
+#' @return compound sentiment by text
+#' @example
+#' vader_compound("i love you")
+#'
 vader_compound <- function(x) {
   # normalized, weighted composite score
   # https://github.com/cjhutto/vaderSentiment#about-the-scoring
@@ -162,12 +193,22 @@ vader_compound <- function(x) {
   }
 }
 
-make_dataset <- function(train_pp, id) {
+#' Get parsed dataset
+#'
+#' function developed to get parse of twitter dataset
+#' https://www.kaggle.com/c/tweet-sentiment-extraction/data
+#'
+#' @param data_pp = dataset pre processed
+#' @return some dataset ngrams analysis
+#' @example
+#' train_parse <- get_parse(train_pp)
+#'
+get_parse <- function(data_pp, id) {
   require(dplyr)
   require(purrr)
   require(stringr)
   
-  x <- train_pp
+  x <- data_pp
   
   if(!is.null(x$selected_text)){
     selected_text = x$selected_text
