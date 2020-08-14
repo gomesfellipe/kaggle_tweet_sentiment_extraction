@@ -48,22 +48,26 @@ jaccard <- function(str1, str2) {
 #' @return cleaned string
 #' @example
 #' clean_text("HavE a niCe DAy!!! :)$$$")
-clean_text <- function(x) {
-  require(dplyr)
-  require(stringr)
+clean_text <- function(x, stem = F) {
+  # require(dplyr)
+  # require(stringr)
   
   x %>%
+    str_remove_all("\\n") %>%
+    str_remove_all("\\[\\[User.*") %>%
+    str_remove_all("\\&quot\\;") %>%
+    str_remove_all("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}") %>% # ip
     str_remove_all("(RT|via)((?:\\b\\W*@\\w+)+)") %>%
     str_to_lower() %>%
     str_remove_all("@\\w+") %>%
     str_remove_all("[[:digit:]]") %>%
-    str_remove_all("http(s|).*") %>%
+    str_remove_all("(http://.*?\\s)|(http://.*)") %>%
     str_remove_all("[ |\t]{2,}") %>%
     str_remove_all("w( |)/") %>%
     str_remove_all("(?! )[^[:alnum:]]") %>%
-    str_remove_all("'\\b\\w{1,2}\\b'") %>%
     str_trim() %>%
-    str_squish()
+    str_squish() 
+  
 }
 
 #' Get Metadata
@@ -138,26 +142,26 @@ get_metadata <- function(x) {
                # mutual statistics
                equal_texts = text == sel_text,
                jaccard = purrr::map2_dbl(text, sel_text, ~ jaccard(.x, .y))) %>% 
-        # add columns start and end sel_text
-        bind_cols(map2_dfr(
-                    .$text, .$sel_text,
-                    ~ { # include \\ before special characters before the search
-                      .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1")
-                      str_locate(.x, .y) %>%
-                        as_tibble() } ) )  
+          # add columns start and end sel_text
+          bind_cols(map2_dfr(
+            .$text, .$sel_text,
+            ~ { # include \\ before special characters before the search
+              .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.)", "\\\\\\1")
+              str_locate(.x, .y) %>%
+                as_tibble() } ) )  
       }else{
         .
       }
     } %>% {
       if(!is_test){
         dplyr::select(., textID, text, sel_text, sentiment, start, end, jaccard, 
-               text_clean, sel_text_clean, everything())    
+                      text_clean, sel_text_clean, everything())    
       }else{
         dplyr::select(., textID, text, sentiment, 
-               text_clean, everything())    
+                      text_clean, everything())    
       }
     }
-    
+  
   
   cat(paste0("Metadata successfully obtained!\nThe process took: ",
              round(Sys.time()-t0) ," seconds")) # Yeah!

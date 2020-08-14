@@ -1,0 +1,690 @@
+---
+title: "Tweet Sentiment Extraction"
+subtitle: "Extract support phrases for sentiment labels"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, comment = F)
+print_digit <- function(x){scales::comma(x, decimal.mark = ",", big.mark = ".")}
+```
+
+Project authors and participants:
+
+* [Fellipe Gomes](https://github.com/gomesfellipe) (Statistics - UFF, Data Scientist - FGV IBRE / BRAZIL)
+* [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
+* [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
+  
+<p align="right"><span style="color:firebrick">Dont forget the upvote if you liked the post! <i class="fas fa-hand-peace"></i></span> </p>
+  
+# Problem Definition
+
+Each row contains the text of a tweet and a sentiment label. In the training set you are provided with a word or phrase drawn from the tweet (selected_text) that encapsulates the provided sentiment.
+
+<center>![](https://www.nablustv.net/Uploads/Image/138264199060853557824.jpg){width=60%}</br><small>Source: <https://www.nablustv.net/Uploads/Image/138264199060853557824.jpg> </small></center>
+
+Premise: 
+
+- remove the beginning / ending quotes from the text field
+- the metric in this competition is the word-level Jaccard score
+- the code for evaluation splits ONLY on whitespace
+
+Objective: predict the word or phrase from the tweet that exemplifies the provided sentiment
+
+Load dependencies:
+
+```{r, include = F}
+library(tidymodels) # tidy machine learning
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(qdapRegex)  # easy regex
+library(tm)         # text mining
+library(tidytext)   # text mining
+library(ggplot2)    # elegant graphs
+library(patchwork)  # grid ggplot
+library(doParallel) # parallel process
+library(foreach)    # parallel process
+
+theme_set(theme_bw()) # set theme
+
+# Install external package:
+if(require(textfeatures) == T){ library(textfeatures) } else{
+  devtools::install("../input/r-textfeatures-package/textfeatures/")
+  library(textfeatures)        
+}
+
+ncores <- 4
+```
+
+```{r, eval = F}
+library(tidymodels) # tidy machine learning
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(qdapRegex)  # easy regex
+library(tm)         # text mining
+library(tidytext)   # text mining
+library(ggplot2)    # elegant graphs
+library(patchwork)  # grid ggplot
+library(doParallel) # parallel process
+library(foreach)    # parallel process
+
+theme_set(theme_bw()) # set theme
+
+# Install external package:
+if(require(textfeatures) == T){ library(textfeatures) } else{
+  devtools::install("../input/r-textfeatures-package/textfeatures/")
+  library(textfeatures)        
+}
+
+ncores <- 4
+```
+
+Function to evaluate model performance:
+
+```{r}
+jaccard <- function(str1, str2) {
+  # r version for: 
+  # https://www.kaggle.com/c/tweet-sentiment-extraction/overview/evaluation
+  a <- unlist(strsplit(tolower(str1), split = " "))
+  b <- unlist(strsplit(tolower(str2), split = " "))
+  c <- intersect(a, b)
+  length(c) / (length(a) + length(b) - length(c))
+}
+```
+
+# Available data
+
+Load available training and test data:
+
+```{r}
+train_data <- read_csv("../data/train.csv") %>% rename(sel_text = selected_text) %>% sample_n(1000)
+test_data <- read_csv("../data/test.csv")
+```
+
+- Train data has `r print_digit(nrow(train_data))` rows and `r ncol(train_data)` columns
+- Test data has `r print_digit(nrow(test_data))` rows and `r ncol(test_data)` columns
+
+Remove missing:
+
+```{r}
+# remove na
+train_data <- train_data %>% filter(!is.na(text) | text == "")
+```
+
+Check Jaccard by sentiment using full text:
+
+```{r}
+train_data %>% 
+  rowwise() %>% 
+  mutate(jaccard = jaccard(text, sel_text)) %>% 
+  ungroup() %>% 
+  group_by(sentiment) %>% 
+  summarise(jaccard = mean(jaccard))
+```
+
+Note that the jaccard of the neutral feeling is quite high when selecting all the text. So, lets hold all the neutral texts before modeling
+
+```{r}
+# Train
+train_neutral <- train_data %>% filter(sentiment == "neutral")
+train_data    <- train_data %>% filter(sentiment != "neutral")
+# Test
+test_neutral <- test_data %>% filter(sentiment == "neutral")
+test_data    <- test_data %>% filter(sentiment != "neutral")
+```
+
+Remove lines from the training data where `sel_text` is not contained in the `text`
+
+```{r}
+bad_text <- train_data %>% 
+  mutate(texts = map(text, ~str_split(.x, " ")[[1]]),
+         sel_texts = map(sel_text, ~str_split(.x, " ")[[1]]),
+         bad_text = map2_lgl(texts, sel_texts, ~ sum(.x %in% .y)==0) ) %>% 
+  pull(bad_text)
+
+train_data <- train_data[!bad_text,]
+```
+
+`r print_digit(sum(bad_text))` lines have been removed.
+
+## N-Gram
+
+We will collect all possible ngrams to train a regression model that estimates a jaccard for each piece.
+
+Ngrams are like this:
+
+<center>![](https://images.deepai.org/glossary-terms/867de904ba9b46869af29cead3194b6c/8ARA1.png){width=60%}</br><small>Source: https://deepai.org/machine-learning-glossary-and-terms/n-gram</small></center>
+
+code:
+
+```{r}
+# Aux function to search special character:
+to_search <- function(x){
+  str_replace_all(x, "([[:punct:]]|\\*|\\+|\\.{1,}|\\:|\\$|\\:|\\^|\\?|\\|)", "\\\\\\1")
+}
+
+# train
+train_ngrams <- 
+  train_data %>% 
+  mutate(n_words = map_dbl(text, ~str_split(.x, pattern = " ", )[[1]] %>% length())) %>% 
+  mutate(ngram_text = map2(text, n_words,  function(text, n_words){
+    map(1:n_words, 
+        ~ tau::textcnt(text, method = "string", split = " ", n = .x, tolower = FALSE) %>% names() %>% unlist()
+    ) } )) %>% 
+  mutate(ngram_text = map(ngram_text, unlist)) %>% 
+  unnest(cols = c(ngram_text)) %>% 
+  mutate(sel = ngram_text == sel_text) %>% 
+  mutate(dif_text = str_remove(text, to_search(ngram_text)))
+
+# test
+test_ngrams <- 
+  test_data %>% 
+  mutate(n_words = map_dbl(text, ~str_split(.x, pattern = " ", )[[1]] %>% length())) %>% 
+  mutate(ngram_text = map2(text, n_words,  function(text, n_words){
+    map(1:n_words, 
+        ~ tau::textcnt(text, method = "string", split = " ", n = .x, tolower = FALSE) %>% names() %>% unlist()
+    ) } )) %>% 
+  mutate(ngram_text = map(ngram_text, unlist)) %>% 
+  unnest(cols = c(ngram_text)) %>% 
+  mutate(dif_text = str_remove(text, to_search(ngram_text)))
+```
+
+Calcule Jaccard betweed each ngram and sel_text (target)
+
+```{r}
+train_ngrams <- train_ngrams %>% 
+  mutate(jaccard = map2_dbl(sel_text, ngram_text, ~jaccard(.x, .y)))
+```
+
+
+Now lets remove more bad lines than where the ngram is not contained in the text:
+
+```{r}
+to_remove <- 
+  train_ngrams %>% 
+  group_by(textID) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  mutate(sel = map_lgl(data, ~any(.x$ngram_text == .x$sel_text))) %>% 
+  filter(sel != T) %>% 
+  pull(textID)
+train_ngrams <- train_ngrams %>% filter(!textID %in% to_remove)
+```
+
+`r print_digit(length(to_remove))` rows are removed
+
+# Exploratory Analysis
+
+In this step, pipelines will be developed to collect metadata and parse the columns `text`,` ngram_tex` and `dif_text`.
+
+<center>![](https://innovation.alteryx.com/content/images/2019/08/BlogPost-03-01.png){width=60%}</br><small>Source: <https://innovation.alteryx.com/natural-language-processing-featuretools/></small></center>
+
+## Metadata
+
+Lets fit the regression model with tabular information about the text. 
+
+We developed a function that collects the metadata of each text / ngram / dif text:
+
+```{r}
+get_metadata <- function(x, verbose = F){
+  
+  if(verbose == T){
+    t0 <- Sys.time() # to print time
+    cat("Getting metadata, please wait ..\n")  
+  }
+  
+  # get metadata with `textfeatures`
+  metadata <- textfeatures::textfeatures(x, normalize = F, word_dims = 0, verbose = verbose)
+  
+  # discart default n_words and n_uq_words
+  metadata <- metadata %>% select(-n_words, -n_uq_words)
+  
+  # more features
+  # quantas ngrams possiveis?
+  # qual ngram antes e qual depois
+  
+  metadata <- 
+    tibble(text = x) %>% 
+    rowwise() %>% 
+    mutate(
+      n_words = length(str_split(text, pattern = " ")[[1]]),
+      n_uq_words = length(unique(str_split(text, pattern = " ")[[1]]))) %>% 
+    ungroup() %>% 
+    transmute(
+      n_vogals = str_count(str_to_lower(text), "[aeiou]"),
+      n_consonants = str_count(str_to_lower(text), "[bcdfghjklmnpqrstvwxyz]"),
+      n_str = str_length(text),
+      # n_upper = str_count(text, "[A-Z]"), # n_caps
+      n_neg = str_count(str_to_lower(text), "(\\bno+\\b|\\bnor+\\b|\\bnot+\\b|n\\'t\\b)"), # negatives
+      n_atpeople = str_count(text, "@\\w+"),
+      n_question = str_count(text, "\\?+"),
+      # n_dot = str_count(text, "\\.+"), # n_period
+      n_retweet = str_count(text, "(RT|via)((?:\\b\\W*@\\w+)+)")
+    ) %>% 
+    bind_cols(metadata)
+  
+  # combine plural person in metadata
+  metadata <- metadata %>% 
+    mutate(n_first_person = n_first_person + n_first_personp,
+           n_second_person = n_second_person + n_second_personp) %>% 
+    select(-n_first_personp, -n_second_personp)
+  
+  if(verbose == T){
+    cat(paste0("Metadata successfully obtained!\nThe process took: ",
+               round(difftime(Sys.time(), t0, units = "mins")) ," min\n")) # Yeah!  
+  }  
+  
+  
+  return(metadata)
+}
+```
+
+get metadata from train:
+
+```{r, eval = T}
+# get text metadata
+text_metadata <-
+  bind_cols(tibble(textID = train_data$textID), get_metadata(train_data$text, verbose = T) %>% 
+              `colnames<-`(paste0("text_",colnames(.)))) 
+
+# get sel_text metadata
+sel_text_metadata <-
+  bind_cols(tibble(textID = train_ngrams$textID), get_metadata(train_ngrams$ngram_text, verbose = T) %>% 
+              `colnames<-`(paste0("sel_text_",colnames(.)))) 
+
+# get dif_text metadata
+dif_text_metadata <-
+  bind_cols(tibble(textID = train_ngrams$textID), get_metadata(train_ngrams$dif_text, verbose = T) %>% 
+              `colnames<-`(paste0("dif_text_",colnames(.)))) 
+
+# join all in metadata
+train_metadata <- 
+  left_join(
+    bind_cols(sel_text_metadata, select(dif_text_metadata, -textID)),
+    bind_cols(train_data, select(text_metadata, -textID)),
+    by = "textID"
+  ) %>% 
+  bind_cols(select(train_ngrams, ngram_text, dif_text, jaccard, n_words)) %>% 
+  select(textID, text, sel_text, ngram_text, dif_text, sentiment, n_words, jaccard, everything())
+saveRDS(train_metadata, "../data/train_metadata.rds")
+```
+
+```{r, echo = F, eval = F}
+train_metadata <- readRDS("../data/train_metadata.rds")
+```
+
+```{r}
+train_metadata
+```
+
+get metadata from test:
+
+```{r, eval = T}
+# get text metadata
+text_metadata <-
+  bind_cols(tibble(textID = test_data$textID), get_metadata(test_data$text, verbose = T) %>% 
+              `colnames<-`(paste0("text_",colnames(.)))) 
+
+# get sel_text metadata
+sel_text_metadata <-
+  bind_cols(tibble(textID = test_ngrams$textID), get_metadata(test_ngrams$ngram_text, verbose = T) %>% 
+              `colnames<-`(paste0("sel_text_",colnames(.)))) 
+
+# get dif_text metadata
+dif_text_metadata <-
+  bind_cols(tibble(textID = test_ngrams$textID), get_metadata(test_ngrams$dif_text, verbose = T) %>% 
+              `colnames<-`(paste0("dif_text_",colnames(.)))) 
+
+# join all in metadata
+test_metadata <- 
+  left_join(
+    bind_cols(sel_text_metadata, select(dif_text_metadata, -textID)),
+    bind_cols(test_data, select(text_metadata, -textID)),
+    by = "textID"
+  ) %>% 
+  bind_cols(select(test_ngrams, ngram_text, dif_text, n_words)) %>% 
+  select(textID, text, ngram_text, dif_text, sentiment, n_words, everything())
+saveRDS(test_metadata, "../data/test_metadata.rds")
+```
+
+```{r, echo = F, eval = F}
+test_metadata <- readRDS("../data/test_metadata.rds")
+```
+
+```{r}
+test_metadata
+```
+
+## Parse
+
+Function developed to calculate statistics for each ngram in relation to the entire text and for each one that remains after removing the ngrams in relation to the entire text
+
+```{r}
+parse_metadata <- function(metadata, test = F){
+  
+metadata <-
+  metadata %>% 
+    mutate(
+      # text stats
+      text_n_words = n_words,
+      # text_n_lowersp,
+      # text_n_capsp,
+      # text_n_charsperword,
+      # sel_text stats        
+      sel_text_n_words = map_dbl(ngram_text, ~length(str_split(.x, pattern = " ")[[1]])),
+      # sel_text_n_lowersp,
+      # sel_text_n_capsp,
+      # sel_text_n_charsperword,
+      # interaction sel_text x text
+      sd_sel_text_sent_afinn        = text_sent_afinn - sel_text_sent_afinn,
+      sd_sel_text_sent_bing         = text_sent_bing - sel_text_sent_bing,
+      sd_sel_text_sent_syuzhet      = text_sent_syuzhet - sel_text_sent_syuzhet,
+      sd_sel_text_sent_vader        = text_sent_vader - sel_text_sent_vader,
+      sd_sel_text_n_polite          = text_n_polite - sel_text_n_polite,
+      prop_sel_text_n_vogals        = if_else(text_n_vogals == 0, 0, sel_text_n_vogals / text_n_vogals),
+      prop_sel_text_n_consonants    = if_else(text_n_consonants == 0, 0, sel_text_n_consonants / text_n_consonants),
+      prop_sel_text_n_str           = if_else(text_n_str == 0, 0, sel_text_n_str / text_n_str),
+      prop_sel_text_len             = text_n_words / sel_text_n_words,
+      prop_sel_text_n_chars         = if_else(text_n_chars == 0, 0, sel_text_n_chars / text_n_chars),
+      prop_sel_text_n_uq_chars      = if_else(text_n_uq_chars == 0, 0, sel_text_n_uq_chars / text_n_uq_chars),
+      prop_sel_text_n_lowers        = if_else(text_n_lowers == 0, 0, sel_text_n_lowers / text_n_lowers),
+      prop_sel_text_n_caps          = if_else(text_n_caps == 0, 0, sel_text_n_caps / text_n_caps),
+      prop_sel_text_n_periods       = if_else(text_n_periods == 0, 0, sel_text_n_periods / text_n_periods),
+      prop_sel_text_n_commas        = if_else(text_n_commas == 0, 0, sel_text_n_commas / text_n_commas),
+      prop_sel_text_n_exclaims      = if_else(text_n_exclaims == 0, 0, sel_text_n_exclaims / text_n_exclaims),
+      prop_sel_text_n_puncts        = if_else(text_n_puncts == 0, 0, sel_text_n_puncts / text_n_puncts),
+      prop_sel_text_n_prepositions  = if_else(text_n_prepositions == 0, 0, sel_text_n_prepositions / text_n_prepositions),
+      cat_sel_text_n_neg            = if_else(sel_text_n_neg == 0, "no", "yes"),
+      cat_sel_text_n_question       = if_else(sel_text_n_question == 0, "no", "yes"),
+      cat_sel_text_n_digits         = if_else(sel_text_n_digits == 0, "no", "yes"),
+      cat_sel_text_n_extraspaces    = if_else(sel_text_n_extraspaces == 0, "no", "yes"),
+      cat_sel_text_n_tobe           = if_else(sel_text_n_tobe == 0, "no", "yes"),
+      cat_sel_text_n_first_person   = if_else(sel_text_n_first_person == 0, "no", "yes"),
+      cat_sel_text_n_second_person  = if_else(sel_text_n_second_person == 0, "no", "yes"),
+      cat_sel_text_n_third_person   = if_else(sel_text_n_third_person == 0, "no", "yes"),
+      
+      # dif_text stats
+      dif_text_n_words = map_dbl(dif_text, ~length(str_split(.x, pattern = " ")[[1]])),
+      # dif_text_n_lowersp,
+      # dif_text_n_capsp,
+      # dif_text_n_charsperword,
+      # interaction dif_text x text
+      sd_dif_text_sent_afinn        = text_sent_afinn - dif_text_sent_afinn,
+      sd_dif_text_sent_bing         = text_sent_bing - dif_text_sent_bing,
+      sd_dif_text_sent_syuzhet      = text_sent_syuzhet - dif_text_sent_syuzhet,
+      sd_dif_text_sent_vader        = text_sent_vader - dif_text_sent_vader,
+      sd_dif_text_n_polite          = text_n_polite - dif_text_n_polite,
+      prop_dif_text_n_vogals        = if_else(text_n_vogals == 0, 0, dif_text_n_vogals / text_n_vogals),
+      prop_dif_text_n_consonants    = if_else(text_n_consonants == 0, 0, dif_text_n_consonants / text_n_consonants),
+      prop_dif_text_n_str           = if_else(text_n_str == 0, 0, dif_text_n_str / text_n_str),
+      prop_dif_text_len             = dif_text_n_words / text_n_words,
+      prop_dif_text_n_chars         = if_else(text_n_chars == 0, 0, dif_text_n_chars / text_n_chars),
+      prop_dif_text_n_uq_chars      = if_else(text_n_uq_chars == 0, 0, dif_text_n_uq_chars / text_n_uq_chars),
+      prop_dif_text_n_lowers        = if_else(text_n_lowers == 0, 0, dif_text_n_lowers / text_n_lowers),
+      prop_dif_text_n_caps          = if_else(text_n_caps == 0, 0, dif_text_n_caps / text_n_caps),
+      prop_dif_text_n_periods       = if_else(text_n_periods == 0, 0, dif_text_n_periods / text_n_periods),
+      prop_dif_text_n_commas        = if_else(text_n_commas == 0, 0, dif_text_n_commas / text_n_commas),
+      prop_dif_text_n_exclaims      = if_else(text_n_exclaims == 0, 0, dif_text_n_exclaims / text_n_exclaims),
+      prop_dif_text_n_puncts        = if_else(text_n_puncts == 0, 0, dif_text_n_puncts / text_n_puncts),
+      prop_dif_text_n_prepositions  = if_else(text_n_prepositions == 0, 0, dif_text_n_prepositions / text_n_prepositions),
+      cat_dif_text_n_neg            = if_else(dif_text_n_neg == 0, "no", "yes"),
+      cat_dif_text_n_question       = if_else(dif_text_n_question == 0, "no", "yes"),
+      cat_dif_text_n_digits         = if_else(dif_text_n_digits == 0, "no", "yes"),
+      cat_dif_text_n_extraspaces    = if_else(dif_text_n_extraspaces == 0, "no", "yes"),
+      cat_dif_text_n_tobe           = if_else(dif_text_n_tobe == 0, "no", "yes"),
+      cat_dif_text_n_first_person   = if_else(dif_text_n_first_person == 0, "no", "yes"),
+      cat_dif_text_n_second_person  = if_else(dif_text_n_second_person == 0, "no", "yes"),
+      cat_dif_text_n_third_person   = if_else(dif_text_n_third_person == 0, "no", "yes"),
+    )  
+    
+    if(test == F){
+        metadata %>%
+            select(textID, text,  sel_text, ngram_text, dif_text, sentiment, jaccard,everything())
+        
+    }else{
+        metadata %>%
+            select(textID, text, ngram_text, dif_text, sentiment,everything())
+    }
+    
+}
+```
+
+Apply function in train and test data:
+
+```{r}
+ttrain <- parse_metadata(train_metadata, test = F) %>% select(-sel_text)
+ttest  <- parse_metadata(test_metadata, test = T)
+
+ttrain$sel_text <- NULL
+```
+
+Remove bad textIDs again (without jaccard = 1):
+
+```{r}
+to_remove <- 
+  ttrain %>% 
+  group_by(textID) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  mutate(sel = map_lgl(data, ~any(.x$jaccard == 1))) %>% 
+  filter(sel != T) %>% 
+  pull(textID)
+ttrain <- ttrain %>% filter(!textID %in% to_remove)
+```
+
+Sample ngrams of each text that have the same jaccard
+
+```{r}
+g1 <- 
+  ttrain %>% 
+  ggplot(aes(x = jaccard, fill = sentiment))+
+  geom_density(alpha = .5)+
+  labs(title = "before random sample")
+
+ttrain %>%
+  mutate(jaccard = case_when(jaccard == 0 ~ 0,
+                             T ~ 1)) %>%
+  filter(!is.na(jaccard)) %>% 
+  count(jaccard) %>% mutate(prop = n/sum(n))
+```
+
+There are many zeros, lets sample ngrams:
+
+```{r}
+set.seed(1)
+
+ttrain <- 
+  ttrain %>% 
+  group_by(textID) %>% nest() %>% ungroup() %>% 
+  mutate(data = map(data, ~.x %>% 
+                      mutate(rounded_jaccard = round(jaccard, 2)) %>% 
+                      group_by(rounded_jaccard) %>%
+                      sample_n(1)%>% 
+                      ungroup())) %>% 
+  unnest(cols = c(data)) %>%
+  select(-rounded_jaccard) 
+
+g2 <- 
+  ttrain %>% 
+  ggplot(aes(x = jaccard, fill = sentiment))+
+  geom_density(alpha = .5)+
+  labs(title = "after random sample")
+
+g1 / g2
+```
+
+# Modeling
+
+For machine learning, we will use the `tidymodels` framework:
+
+<center>![](https://rviews.rstudio.com/post/2019-06-14-a-gentle-intro-to-tidymodels_files/figure-html/tidymodels.png){width=80%}</br><small>Source: https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/</small></center>
+
+Pre processing with `recipes`:
+
+```{r}
+jaccard_recipe <- recipe(ttrain, jaccard ~ .) %>%
+  step_rm(textID, text, ngram_text, dif_text) %>% 
+  step_mutate(sentiment = case_when(sentiment == "positive"~1,
+                              sentiment == "negative"~-1)) %>% 
+  step_YeoJohnson(all_numeric(),-all_outcomes(), -sentiment) %>%
+  step_normalize(all_numeric(),-all_outcomes()) %>%
+  step_dummy(all_nominal())
+```
+
+Define cross validation with `recipes`:
+
+```{r}
+set.seed(123)
+jaccard_vfold <- vfold_cv(ttrain, v = 5, strata = jaccard)
+```
+
+Define model with `parsnip`:
+
+```{r}
+jaccard_xgb_model <- 
+  boost_tree(
+  trees = tune(), 
+  learn_rate = tune(), # step size
+  tree_depth = tune(), min_n = tune(),
+  loss_reduction = tune(), # first three: model complexity
+  sample_size = tune(), mtry = tune(), # randomness
+  ) %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost", nthread = ncores)
+
+```
+
+Start xgboost workflow:
+
+```{r}
+jaccard_workflow <- workflow() %>% add_recipe(jaccard_recipe)
+jaccard_xgb_workflow <-jaccard_workflow %>% add_model(jaccard_xgb_model)
+```
+
+Determine params
+
+```{r}
+xgb_params <- parameters(
+  trees(),
+  learn_rate(), # step size
+  tree_depth(), min_n(), 
+  loss_reduction(), # first three: model complexity
+  sample_size = sample_prop(), finalize(mtry(), ttrain)  # randomness
+)
+
+xgb_params <- xgb_params %>% update(trees = trees(c(100, 500))) 
+```
+
+Atualize xgboost workflow:
+
+```{r}
+workflow_jaccard_xgb_model <- 
+  workflow() %>% 
+  add_model(jaccard_xgb_model) %>% 
+  add_recipe(jaccard_recipe)
+```
+
+Iterative Bayesian optimization of a regression model:
+
+```{r}
+set.seed(321)
+xgb_tune <-
+  workflow_jaccard_xgb_model %>%
+  tune_bayes(
+    resamples = jaccard_vfold,
+    param_info = xgb_params,
+    # initial = ?,
+    iter = 30, 
+    # metrics = metric_set(rmse, mape),
+    control = control_bayes(no_improve = 10, 
+                            save_pred = T, verbose = T)
+  )
+
+autoplot(xgb_tune)
+```
+
+Colect predictions:
+
+```{r}
+collect_predictions(xgb_tune) %>% 
+  select(id,.pred, jaccard) %>% 
+  gather(key, value, -id) %>% 
+  ggplot(aes(x=value, volor = key, fill = key)) + 
+  geom_density(alpha=.2)+ 
+  labs(x = "", y = "")+
+  facet_wrap(~id)+
+  theme(legend.position = "bottom")
+```
+
+Select best model:
+
+```{r}
+jaccard_best_model <- select_best(xgb_tune, "rmse", maximize = F)
+print(jaccard_best_model)
+```
+
+Fit final model:
+
+```{r}
+jaccard_final_model <- finalize_model(jaccard_xgb_model, jaccard_best_model)
+jaccard_workflow    <- workflow_jaccard_xgb_model %>% update_model(jaccard_final_model)
+jaccard_xgb_fit     <- fit(jaccard_workflow, data = ttrain)
+```
+
+Predict jaccard for all test ngrams:
+
+```{r}
+pred <- predict(jaccard_xgb_fit, ttest)
+
+results <- 
+  ttest %>% 
+  bind_cols(as_tibble(pred)) %>% 
+  select(textID, text, ngram_text, .pred) %>% 
+  group_by(textID) %>% 
+  top_n(1, .pred) %>%
+  distinct(textID, .pred, .keep_all = T) %>%
+  ungroup()
+
+head(results)
+```
+
+# Conclusion
+
+Prepare to submit!
+
+```{r}
+submission <- read_csv("../data/sample_submission.csv")
+
+submission <- 
+  submission %>%
+  select(-selected_text) %>%
+  left_join(
+    bind_rows(
+      select(results, textID, selected_text = ngram_text),
+      select(test_neutral, textID, selected_text = text)
+    )
+  )
+
+write_csv(submission, "submission.csv")
+```
+
+# References
+
+<https://www.kaggle.com/nkoprowicz/a-simple-solution-using-only-word-counts>
+<https://www.kaggle.com/khoongweihao/feature-engineering-lightgbm-model-starter-kit>
+<https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/139803>
+<https://www.kaggle.com/jonathanbesomi/question-answering-starter-pack>
+<https://machinelearningmastery.com/gentle-introduction-text-summarization/>
+<https://www.tidymodels.org/learn/work/bayes-opt/> 
+

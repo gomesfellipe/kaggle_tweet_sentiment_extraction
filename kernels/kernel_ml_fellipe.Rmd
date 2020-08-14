@@ -15,9 +15,9 @@ knitr::knit_hooks$set(
       if (language == 'node') language = 'javascript'
       if (!options$highlight) language = 'text'
       if(!is.null(options$foldcode)) {
-      paste0('\n\n', "<details><summary>Source</summary>\n", fence, language, '\n', x, fence,  '\n\n', "</details>\n")
+        paste0('\n\n', "<details><summary>Source</summary>\n", fence, language, '\n', x, fence,  '\n\n', "</details>\n")
       } else {
-              paste0('\n\n', fence, language, '\n', x, fence,  '\n\n')
+        paste0('\n\n', fence, language, '\n', x, fence,  '\n\n')
       }
     }
     x = knitr:::hilight_source(x, 'markdown', options)
@@ -30,6 +30,24 @@ knitr::knit_hooks$set(
     )
   }
 )
+
+#' Custom Kabble plot
+#' 
+#' Custom kable to kaggle kernels
+#' 
+#' @param x dataframe
+#' @return print a custom html table
+#' @example 
+#' kable2(mtcars)
+kable2 <- function(x, height = "300px"){
+  require(knitr)
+  require(kableExtra)
+  
+  kable(x) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive", "bordered"),
+                  full_width = F, position = "center") %>%
+    scroll_box(width = "100%", height = height)
+}
 ```
 
 Project authors and participants:
@@ -51,7 +69,9 @@ library(dplyr)      # manipulate data
 library(tidyr)      # tidy data
 library(purrr)      # functional programming
 library(stringr)    # text manipulation
-library(quanteda)   # textmining
+library(qdapRegex)  # easy regex
+library(tm)         # text mining
+library(tidytext)   # text mining
 library(knitr)      # print table
 library(kableExtra) # custom table
 library(ggplot2)    # elegant plot
@@ -59,11 +79,404 @@ library(GGally)     # Pairs
 library(gghalves)   # half plot
 theme_set(theme_bw()) # set theme
 
+```
+
+
+
+```{r}
+source("../functions.R")
+# metadata <- get_metadata(train_data)
+```
+
+# Problem Definition
+
+<!-- Descrever fonte dos dados, processo manual -->
+
+<!-- premissas: -->
+<!-- Pontos de reflexao -->
+<!-- Problemas de corte nos textos selecionados não terão impacto sobre o a medida Jaccard final -->
+<!-- O txto selecionado foi obtido por um modelo e elesq ueremo comparar os resultados ou um humano apenas copiou e colou  -->
+<!-- Existem select text que aparecem mais de uma vezno text  -->
+
+A métrica para esta competicao será um score baseado na similaridade Jaccard que é definida como o tamanho da interseçao dividida pelo tamanho da união de dois conjuntos, de acordo com [o link sugerido na descrição da competição](https://towardsdatascience.com/overview-of-text-similarity-metrics-3397c4601f50). Matematicamente:
+
+$$jaccard(A, B) = \frac{|A \bigcap B|}{ |A\bigcup B|} = \frac{|A \bigcap B|}{ |A| + |B| -  |A|\bigcup|B|}$$
+
+onde, $ 0\le J(A,B)\le 1$.
+
+Desenvolver a funcao em R:
+
+```{r}
+#' Jaccard
+#'
+#' function developed to solve the problem in kaggle
+#' https://www.kaggle.com/c/tweet-sentiment-extraction/
+#'
+#' @param str1 string
+#' @param str2 string
+#' @return Jaccard metric
+#' @examples
+#' str1 <- "Ola cOmo Vai voce"
+#' str2 <- "Ola cOmo vai "
+#' jaccard(str1, str2)
+jaccard <- function(str1, str2) {
+  # r version for: https://www.kaggle.com/c/tweet-sentiment-extraction/overview/evaluation
+  a <- unlist(strsplit(tolower(str1), split = " "))
+  b <- unlist(strsplit(tolower(str2), split = " "))
+  c <- intersect(a, b)
+  length(c) / (length(a) + length(b) - length(c))
+}
+```
+
+Note que da forma que a funcao é definida, espaços em branco extras podem ser desconsiderados e podemos trabalhar com as strings como minusculo.
+
+# Available data
+
+```{r}
 # getting data:
 train_data <- read_csv("../data/train.csv")
-source("../functions.R")
-metadata <- get_metadata(train_data)
+
+train_data %>% head(100) %>% kable2()
+```
+
+Remover observacoes incompletas:
+
+```{r}
+train_data <- train_data %>% filter(!is.na(text) | text == "")
+```
+
+# Exploratory Analysis
+
+Definir uma funcao para limpeza dos tweets, quando pertinente:
+
+```{r}
+#' Clean Tweets
+#'
+#' fucntion to clean general text from twitter
+#'
+#' @param x string
+#' @return cleaned string
+#' @example
+#' clean_text("HavE a niCe DAy!!! :)$$$")
+clean_text <- function(x, stem = F) {
+  
+  x %>%
+    str_remove_all("\\'\\w") %>%
+    str_remove_all("\\n") %>%
+    str_remove_all("\\&quot\\;") %>%
+    str_remove_all("(RT|via)((?:\\b\\W*@\\w+)+)") %>%
+    rm_date() %>% 
+    rm_dollar() %>% 
+    rm_angle() %>% 
+    rm_email() %>% 
+    # rm_city_state_zip() %>% 
+    rm_endmark() %>%
+    rm_hash() %>% 
+    rm_number() %>% 
+    rm_percent() %>% 
+    rm_phone() %>% 
+    rm_tag() %>% 
+    rm_time() %>% 
+    str_to_lower() %>%
+    str_remove_all("(http://.*?\\s)|(http://.*)") %>%
+    str_remove_all("@\\w+") %>%
+    str_replace_all('([[:alpha:]])\\1{2,}', "\\1") %>%
+    str_remove_all("[[:digit:]]") %>% 
+    str_replace_all("(?! )[^[:alnum:]]", " ") %>%
+    str_remove_all("\\bh[aeiou]h[aeiou]{1,}\\b") %>%
+    removeWords(stopwords() %>% .[!. %in% c('no', 'nor', 'not')]) %>% 
+    # str_remove_all("\\b\\w{1,2}\\b") %>% 
+    stringi::stri_trans_general(id = "Latin-ASCII") %>% 
+    str_remove_all("'|\"|'|“|”|\"|\n|,|\\.|…|\\?|\\+|\\-|\\/|\\=|\\(|\\)|‘") %>% 
+    str_trim() %>%
+    str_squish()
+  
+}
+```
+
+
+Primeiramente vamos coletar alguns metadados 
+
+```{r}
+# get metadata
+metadata <- textfeatures(train_data$text, normalize = F)
+
+# feature engineering
+to_remove <- 
+  metadata %>%
+  map_dbl(~ sum(.x == 0) / length(.x)) %>% 
+  {which(. > .95)} %>% 
+  names()
+
+metadata <- metadata %>% select(-one_of(to_remove))
+
+to_cat <- 
+  metadata %>% 
+  select(-starts_with("w")) %>% 
+  map_dbl(~ sum(.x == 0) / length(.x)) %>% 
+  {which(. > .8 & . < .95)} %>% 
+  names()
+
+metadata <- metadata %>% mutate_at(to_cat, ~if_else(.x == 0, 0, 1))
+
+
+metadata <- 
+  train_data %>% 
+  transmute(jaccard = purrr::map2_dbl(text, selected_text, ~ jaccard(.x, .y)),
+            sentiment) %>% 
+  bind_cols(metadata)
+
+DataExplorer::create_report(select(metadata, -starts_with("w")), y = "jaccard")
+skimr::skim(metadata)
+
+metadata %>% 
+  select(-starts_with("w")) %>% 
+  funModeling::df_status(print_results = F) %>% 
+  arrange(unique)
+
+
+table(metadata$n_urls)
+
+
+
+set.seed(3) # reprodutibility
+samp <- sample(1:2, nrow(metadata), T, c(0.9, 0.1))
+
+valid_metadata <- metadata[samp == 2,]
+train_metadata <- metadata[samp == 1,]
+
+m <- gamlss::gamlss(jaccard ~., data = train_metadata, family = gamlss.dist::BEINF())
+plot(m)
+gamlss::Rsq(m)
+summary(m)
+
+
+
+
+
+metadata <- 
+  train_data %>% 
+  mutate(text_clean = clean_text(text)) %>%
+  filter(text_clean != "")%>% 
+  rowwise() %>% 
+  mutate(
+    text_len = str_length(text),
+    text_nwords = length(str_split(text, pattern = " ")[[1]]),
+    text_nunique_words = length(unique(str_split(text, pattern = " ")[[1]])),
+    text_propwords_unique = text_nunique_words / text_nwords,
+    text_nupper = str_count(text, "[A-Z]"),
+    text_npunc = str_count(text, "[[:punct:]]"),
+    text_nemoticon = length(ex_emoticon(text)[[1]]),
+    text_neg = str_count(text_clean, "(no|nor|not)"),
+    text_numbers = length(ex_number(text)[[1]]),
+    text_links = str_count(text, "(http://.?\\s)|(http://.)"),
+    text_hashtags = str_count(text, "#\\w+"),
+    text_atpeople = str_count(text, "@\\w+"),
+    text_retweet = str_count(text, "(RT|via)((?:\\b\\W*@\\w+)+)")
+  ) %>% 
+  ungroup()
 
 ```
+
+To train
+
+```{r}
+metadata <- 
+  metadata %>% 
+  mutate(
+    jaccard = purrr::map2_dbl(text, selected_text, ~ jaccard(.x, .y))
+  ) %>% 
+  bind_cols(
+    map2_dfr(.$text, .$selected_text,
+             ~ { .y <- str_replace_all(.y, "([[:punct:]]|\\*|\\+|\\.|\\$|\\^)",
+                                       "\\\\\\1")
+             str_locate(.x, .y) %>%
+               as_tibble() 
+             } ) ) %>% 
+  mutate(selected_text_len = end - start) %>%
+  mutate(sentiment = case_when(sentiment == "negative" ~ -1,
+                               sentiment == "neutral" ~ 0,
+                               sentiment == "positive" ~ 1))
+```
+
+```{r}
+
+# set validation
+set.seed(3) # reprodutibility
+samp <- sample(1:2, nrow(metadata), T, c(0.9, 0.1))
+
+valid_metadata <- metadata[samp == 2,]
+train_metadata <- metadata[samp == 1,]
+```
+
+
+https://github.com/h2oai/h2o-3/blob/master/h2o-r/demos/rdemo.word2vec.craigslistjobtitles.R
+https://gist.github.com/ledell/71e0b8861d4fa35b59dde2af282815a5
+http://docs.h2o.ai/h2o/latest-stable/h2o-r/docs/reference/h2o.xgboost.html
+https://github.com/h2oai/h2o-tutorials/blob/master/h2o-open-tour-2016/chicago/grid-search-model-selection.R
+https://gist.github.com/ledell/71e0b8861d4fa35b59dde2af282815a5
+
+```{r}
+library(h2o)
+h2o.init(nthreads = -1)
+# h2o.no_progress() # Turn off progress bars
+
+# `predict` conflicts with generic fn defined in R.stats
+.predict <- function(data, w2v.model, gbm) {
+    words <- na.omit(h2o.tokenize(as.h2o(data)$text, split = " "))
+    vec <- h2o.transform(w2v.model, words, aggregate_method = "AVERAGE")
+    vec <- h2o.cbind(as.h2o(data[, c("sentiment")]), vecs)
+    h2o.predict(gbm, vec)
+}
+
+# valid_metadata <- as.h2o(valid_metadata) 
+train_metadata <- as.h2o(train_metadata) 
+
+words <- h2o.tokenize(train_metadata$text_clean, " ")
+
+w2v.model <- h2o.word2vec(words,vec_size = 20, sent_sample_rate = 0, epochs = 50)
+
+vecs <- h2o.transform(w2v.model, words, aggregate_method = "AVERAGE")
+
+valid_data <-  ! is.na(vecs$C1)
+
+data_start <- h2o.cbind(train_metadata[valid_data, c("sentiment","start")],
+                        vecs[valid_data,])
+
+data_len <- h2o.cbind(train_metadata[valid_data, c("sentiment","selected_text_len")],
+                      vecs[valid_data,])
+
+
+# data.split <- h2o.splitFrame(data_start, ratios = 0.8)
+
+# Some XGboost/GBM hyperparameters
+hyper_params <- list(ntrees = seq(400, 1000, 1),
+                     learn_rate = seq(0.001, 0.2, 0.001),
+                     max_depth = seq(1, 20, 1),
+                     sample_rate = seq(0.5, 1.0, 0.0001),
+                     col_sample_rate = seq(0.2, 1.0, 0.0001))
+
+search_criteria <- list(strategy = "RandomDiscrete",
+                        max_models = 10, 
+                        seed = 1)
+
+gbm.model <- h2o.grid(algorithm = "xgboost",
+                      x = c(names(vecs), "sentiment"),
+                      y = "start",
+                      training_frame = data_start, 
+                      # nfolds = 5,
+                      seed = 1,
+                      hyper_params = hyper_params,
+                      # stopping_metric = "deviance",
+                      search_criteria = search_criteria)
+
+# Get the grid results, sorted by validation AUC
+gbm_gridperf1 <- h2o.getGrid(grid_id = gbm.model@grid_id,
+                             sort_by = "r2",
+                             decreasing = TRUE)
+print(gbm_gridperf1)
+
+# Grab the top GBM model, chosen by validation AUC
+best_gbm1 <- h2o.getModel(gbm_gridperf1@model_ids[[1]])
+
+# Now let's evaluate the model performance on a test set
+# so we get an honest estimate of top model performance
+best_gbm_perf1 <- h2o.performance(model = best_gbm1,
+                                  newdata = vec)
+h2o.r2(best_gbm_perf1)
+grid_top_model <- gbm_gridperf1@summary_table[1, "model_ids"]
+
+predict(best_gbm1, vec)
+
+data <- valid_metadata
+words <- h2o.tokenize(as.h2o(data)$text_clean, split = " ")
+vecs <- h2o.transform(w2v.model, words, aggregate_method = "AVERAGE")
+vec <- h2o.cbind(as.h2o(data[, c("sentiment", "start")]), vecs)
+
+
+
+.predict(valid_metadata[1,], w2v.model, gbm.model@)
+```
+
+
+
+
+
+```{r, eval = F}
+data_tfidf <- 
+  train_data %>% 
+  mutate(text_clean = clean_text(text)) %>%
+  filter(text_clean != "") %>% 
+  unnest_tokens(word, text_clean, token = "regex", pattern= " ") %>% 
+  # mutate(word = SnowballC::wordStem(word) ) %>% 
+  # anti_join(tibble(word = tm::stopwords("eng")), by = "word") %>% 
+  count(sentiment, word, sort = T,.drop = F) %>% 
+  filter(n > 2) %>% 
+  bind_tf_idf(word, sentiment, n) %>% 
+  filter(tf_idf != 0 )
+
+# Nested data, remove stopwords, filters, props
+nested_data <-
+  data_tfidf %>% 
+  group_by(sentiment) %>% 
+  nest() %>% 
+  mutate(word_wtd = map2(data, data, ~ .x %>% mutate(prop = n / nrow(.y))))
+
+# Re-weight:
+
+# negative: 
+adj <- 
+  inner_join(nested_data$word_wtd[[1]], nested_data$word_wtd[[2]], by = "word") %>% 
+  transmute(word, prop = prop.x + prop.y)
+
+nested_data$word_wtd[[3]] <- 
+  nested_data$word_wtd[[3]] %>% 
+  left_join(adj, by = "word") %>% 
+  mutate(prop.y = ifelse(is.na(prop.y), 0, prop.y)) %>% 
+  transmute(word, n, prop = prop.x - prop.y)
+
+# positive:
+adj <- 
+  inner_join(nested_data$word_wtd[[2]], nested_data$word_wtd[[3]], by = "word") %>% 
+  transmute(word, prop = prop.x + prop.y)
+
+nested_data$word_wtd[[1]] <- 
+  nested_data$word_wtd[[1]] %>% 
+  left_join(adj, by = "word") %>% 
+  mutate(prop.y = ifelse(is.na(prop.y), 0, prop.y)) %>% 
+  transmute(word, n, prop = prop.x - prop.y)
+
+# neutral:
+adj <- 
+  inner_join(nested_data$word_wtd[[3]], nested_data$word_wtd[[1]], by = "word") %>% 
+  transmute(word, prop = prop.x + prop.y)
+
+nested_data$word_wtd[[2]] <- 
+  nested_data$word_wtd[[2]] %>% 
+  left_join(adj, by = "word") %>% 
+  mutate(prop.y = ifelse(is.na(prop.y), 0, prop.y)) %>% 
+  transmute(word, n, prop = prop.x - prop.y)
+
+# unnest and return
+words_wtd <- 
+  nested_data %>% 
+  mutate(word_wtd = map(word_wtd, ~select(.x, -word, -n))) %>% 
+  ungroup() %>% 
+  unnest(cols = c(data, word_wtd))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

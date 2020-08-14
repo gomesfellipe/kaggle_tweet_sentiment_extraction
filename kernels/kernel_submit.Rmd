@@ -2,11 +2,16 @@
 title: "Tweet Sentiment Extraction"
 subtitle: "Extract support phrases for sentiment labels"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: html_document
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, comment = F)
+print_digit <- function(x){scales::comma(x, decimal.mark = ",", big.mark = ".")}
 ```
 
 Project authors and participants:
@@ -15,18 +20,143 @@ Project authors and participants:
 * [Rumenick Pereira da Silva](https://github.com/Rumenick) (PhD Statistics - UFMG, Data Scientist - FGV IBRE / BRAZIL)
 * [Luiz Fernando Coelho Passos](https://github.com/luizfcp) (Statistics student - UFF, Data Scientist Intern - FGV IBRE / BRAZIL)
   
+<p align="right"><span style="color:firebrick">Dont forget the upvote if you liked the post! <i class="fas fa-hand-peace"></i></span> </p>
+  
 # Problem Definition
 
-<!-- Descrever fonte dos dados, processo manual -->
+Each row contains the text of a tweet and a sentiment label. In the training set you are provided with a word or phrase drawn from the tweet (selected_text) that encapsulates the provided sentiment.
 
-<!-- premissas: -->
-<!-- Pontos de reflexao -->
-<!-- Problemas de corte nos textos selecionados não terão impacto sobre o a medida Jaccard final -->
-<!-- O txto selecionado foi obtido por um modelo e elesq ueremo comparar os resultados ou um humano apenas copiou e colou  -->
-<!-- Existem select text que aparecem mais de uma vezno text  -->
+<center>![](https://www.nablustv.net/Uploads/Image/138264199060853557824.jpg){width=60%}</br><small>Source: <https://www.nablustv.net/Uploads/Image/138264199060853557824.jpg> </small></center>
 
+Premise: 
+
+- remove the beginning / ending quotes from the text field
+- the metric in this competition is the word-level Jaccard score
+- the code for evaluation splits ONLY on whitespace
+
+Objective: predict the word or phrase from the tweet that exemplifies the provided sentiment
+
+Load dependencies:
+
+```{r, include = F}
+# library(caret)
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(qdapRegex)  # easy regex
+library(tm)         # text mining
+library(tidytext)   # text mining
+library(ggplot2)    # elegant graphs
+library(patchwork)  # grid ggplot
+library(doParallel) # parallel process
+library(foreach)    # parallel process
+
+theme_set(theme_bw()) # set theme
+
+# Install external package:
+if(require(textfeatures) == T){ library(textfeatures) } else{
+  devtools::install("../input/r-textfeatures-package/textfeatures/")
+  library(textfeatures)        
+}
+```
+
+```{r, eval = F}
+# library(caret)
+library(readr)      # read/write
+library(dplyr)      # manipulate data
+library(tidyr)      # tidy data
+library(purrr)      # functional programming
+library(stringr)    # text manipulation
+library(qdapRegex)  # easy regex
+library(tm)         # text mining
+library(tidytext)   # text mining
+library(ggplot2)    # elegant graphs
+library(patchwork)  # grid ggplot
+library(doParallel) # parallel process
+library(foreach)    # parallel process
+
+theme_set(theme_bw()) # set theme
+
+# Install external package:
+if(require(textfeatures) == T){ library(textfeatures) } else{
+  devtools::install("../input/r-textfeatures-package/textfeatures/")
+  library(textfeatures)        
+}
+```
+
+Function to evaluate model performance:
+
+```{r}
+jaccard <- function(str1, str2) {
+  # r version for: 
+  # https://www.kaggle.com/c/tweet-sentiment-extraction/overview/evaluation
+  a <- unlist(strsplit(tolower(str1), split = " "))
+  b <- unlist(strsplit(tolower(str2), split = " "))
+  c <- intersect(a, b)
+  length(c) / (length(a) + length(b) - length(c))
+}
+```
 
 # Available data
+
+Load available training and test data:
+
+```{r}
+train_data <- read_csv("../data/train.csv") %>% 
+  rename(sel_text = selected_text)
+
+test_data <- read_csv("../data/test.csv")
+```
+
+- Train data has `r print_digit(nrow(train_data))` rows and `r ncol(train_data)` columns
+- Test data has `r print_digit(nrow(test_data))` rows and `r ncol(test_data)` columns
+
+Remove missing:
+
+```{r}
+# remove na
+train_data <- train_data %>% filter(!is.na(text) | text == "")
+```
+
+
+Check Jaccard by sentiment using full text:
+
+```{r}
+train_data %>% 
+  rowwise() %>% 
+  mutate(jaccard = jaccard(text, sel_text)) %>% 
+  group_by(sentiment) %>% 
+  summarise(jaccard = mean(jaccard))
+```
+
+Note that the jaccard of the neutral feeling is quite high when selecting all the text. So, let's hold all the neutral texts before modeling
+
+```{r}
+# Train
+train_neutral <- train_data %>% filter(sentiment == "neutral")
+train_data    <- train_data %>% filter(sentiment != "neutral")
+# Test
+test_neutral <- test_data %>% filter(sentiment == "neutral")
+test_data    <- test_data %>% filter(sentiment != "neutral")
+```
+
+Remove lines from the training data where `sel_text` is not contained in the `text`
+
+```{r}
+bad_text <- train_data %>% 
+  mutate(texts = map(text, ~str_split(.x, " ")[[1]]),
+         sel_texts = map(sel_text, ~str_split(.x, " ")[[1]]),
+         bad_text = map2_lgl(texts, sel_texts, ~ sum(.x %in% .y)==0) ) %>% 
+  pull(bad_text)
+
+train_data <- train_data[!bad_text,]
+```
+
+`r print_digit(sum(bad_text))` lines have been removed.
+
+
 
 # Exploratory Analysis
 
